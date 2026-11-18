@@ -364,6 +364,7 @@ for (const modern of [false, true]) {
                 "list_countries",
                 "crossref_search",
                 "crossref_work",
+                "pdb_entry",
             ].sort(),
         );
     });
@@ -644,4 +645,102 @@ test("CrossRef search and work lookup formats DOIs, authors and citation metrics
     const workVal = value(workRes);
     assert.equal(workVal.work.doi, "10.1038/nature12373");
     assert.equal(workVal.work.container, "Nature");
+});
+
+test("pdb_entry returns the projected entry, uppercases the id, and sends no credentials", async (t) => {
+    let fetches = 0;
+    mock.method(globalThis, "fetch", async (url, options) => {
+        fetches += 1;
+        const request = new Request(url, options);
+        const target = new URL(request.url);
+        assert.equal(target.hostname, "data.rcsb.org");
+        assert.equal(target.pathname, "/rest/v1/core/entry/4HHB");
+        const headers = request.headers;
+        assert.equal(headers.get("authorization"), null);
+        assert.equal(headers.get("cookie"), null);
+        assert.match(headers.get("user-agent"), /hello@pollinations.ai/);
+        return Response.json({
+            rcsb_id: "4HHB",
+            struct: {
+                title: "THE CRYSTAL STRUCTURE OF HUMAN DEOXYHAEMOGLOBIN AT 1.74 ANGSTROMS RESOLUTION",
+            },
+            exptl: [{ method: "X-RAY DIFFRACTION" }],
+            rcsb_entry_info: {
+                experimental_method: "X-ray",
+                resolution_combined: [1.74],
+                deposited_atom_count: 4779,
+                molecular_weight: 64.74,
+            },
+            rcsb_accession_info: {
+                deposit_date: "1984-03-07T00:00:00.000+00:00",
+                initial_release_date: "1984-07-17T00:00:00.000+00:00",
+                status_code: "REL",
+            },
+            rcsb_primary_citation: {
+                title: "The crystal structure of human deoxyhaemoglobin at 1.74 A resolution",
+                journal_abbrev: "J.Mol.Biol.",
+                rcsb_journal_abbrev: "J Mol Biol",
+                journal_volume: "175",
+                page_first: "159",
+                page_last: "174",
+                year: 1984,
+                pdbx_database_id_DOI: "10.1016/0022-2836(84)90472-8",
+                pdbx_database_id_PubMed: 6726807,
+                rcsb_authors: [
+                    "Fermi, G.",
+                    "Perutz, M.F.",
+                    "Shaanan, B.",
+                    "Fourme, R.",
+                ],
+            },
+            cell: { length_a: 63.15, length_b: 83.59, length_c: 53.8 },
+        });
+    });
+
+    const c = await client(t);
+    const result = await call(c, "pdb_entry", { id: "4hhb" });
+    assert.notEqual(result.isError, true, JSON.stringify(result));
+    assert.equal(fetches, 1);
+    assert.deepEqual(value(result), {
+        id: "4HHB",
+        title: "THE CRYSTAL STRUCTURE OF HUMAN DEOXYHAEMOGLOBIN AT 1.74 ANGSTROMS RESOLUTION",
+        experimental_method: "X-ray",
+        resolution_angstrom: 1.74,
+        deposit_date: "1984-03-07",
+        release_date: "1984-07-17",
+        citation: {
+            title: "The crystal structure of human deoxyhaemoglobin at 1.74 A resolution",
+            journal: "J Mol Biol",
+            volume: "175",
+            pages: "159-174",
+            year: 1984,
+            doi: "10.1016/0022-2836(84)90472-8",
+            pubmed: 6726807,
+            authors: ["Fermi, G.", "Perutz, M.F.", "Shaanan, B.", "Fourme, R."],
+        },
+    });
+});
+
+test("pdb_entry maps a missing id to a clean error and rejects bad ids without fetching", async (t) => {
+    let fetches = 0;
+    mock.method(globalThis, "fetch", async () => {
+        fetches += 1;
+        return new Response(
+            JSON.stringify({
+                status: 404,
+                message: "No data found for entryId: ZZZZ",
+            }),
+            { status: 404, headers: { "content-type": "application/json" } },
+        );
+    });
+
+    const c = await client(t);
+    const missing = await call(c, "pdb_entry", { id: "ZZZZ" });
+    assert.equal(missing.isError, true);
+    assert.match(missing.content[0].text, /No PDB entry found for ZZZZ/);
+    assert.equal(fetches, 1);
+
+    const short = await call(c, "pdb_entry", { id: "ABC" });
+    assert.equal(short.isError, true);
+    assert.equal(fetches, 1);
 });
