@@ -364,6 +364,7 @@ for (const modern of [false, true]) {
                 "list_countries",
                 "crossref_search",
                 "crossref_work",
+                "osrswiki_search",
             ].sort(),
         );
     });
@@ -644,4 +645,315 @@ test("CrossRef search and work lookup formats DOIs, authors and citation metrics
     const workVal = value(workRes);
     assert.equal(workVal.work.doi, "10.1038/nature12373");
     assert.equal(workVal.work.container, "Nature");
+});
+const OSRSWIKI_DRAGON_EXTRACT = `Dragon may refer to:
+
+Dragon (race)
+Dragon equipment
+Draconic (attribute) - an attribute on creatures weak to Dragonbane weapons
+Dragonkin - ancient race responsible for the creation of dragons and dragon equipment
+Orikalkum - the metal dragon equipment is made from
+Dragonhide armour`;
+const OSRSWIKI_SLASH_EXTRACT = `Slash is an attack type that is used by weapons classes such as Scimitars, Whips and Claws, and secondarily by weapons such as Swords and Daggers.
+
+
+== Weapons ==
+
+
+=== Exclusive ===
+The following weapon types offer only slash-based attacks. 
+
+
+==== Whips ====
+
+
+=== Primary ===
+The majority of attack styles associated with the following weapon types are slash-based.
+
+
+==== Axes ====
+
+
+==== Claws ====
+
+
+==== Scythes ====
+
+
+==== Slash swords ====
+
+
+==== Two-handed swords ====
+
+
+=== Secondary ===
+The following weapon types have at least one slash-based attack style.
+
+
+==== Banners ====
+
+
+==== Bladed staves ====
+
+
+==== Polearms ====
+
+
+==== Salamanders ====
+
+
+==== Spears ====
+
+
+==== Stabbing swords ====
+
+
+== Best Slash attack bonus ==
+
+
+== Best Slash defence bonus ==
+
+
+== See also ==
+Stab weapons
+Crush weapons
+Ranged weapons
+Magic weapons`;
+const OSRSWIKI_LONGSWORD_EXTRACT = `The dragon longsword is the third-strongest longsword available in Old School RuneScape, and can only be wielded by players who have at least 60 Attack and have completed the Lost City quest.
+As with all dragon weapons, players cannot make this item using the Smithing skill. However, it can be purchased in the Zanaris marketplace from Jukat for 100,000 coins (requires a Diamond for entry). The weapon can also be received as a reward from elite Treasure Trails.
+It is a preferred weapon for players buying their first dragon weapon as it has a low cost but can still inflict significant damage. For a long time, prior to the 2005 introduction of the abyssal whip and dragon scimitar, this was the weapon of choice for both player killing and training.
+It can be upgraded to the Dragon longsword (bh) with a Dragon longsword imbue scroll, which has a +4 increased stab and +6 slash attack bonus, and a +25% accuracy bonus to the special attack. In addition, the special attack consumes only 15% special attack energy rather than 25%, and is one tick faster (2.4 seconds instead of 3.0 seconds). The upgraded version can only be used for PKing in the Bounty Hunter minigame.
+
+
+== Combat stats ==
+
+
+== Special attack ==
+
+The dragon longsword has a special attack called Cleave, which raises the player's maximum hit by 25% for one hit, consuming 25% of the player's special attack energy. The accuracy roll for Cleave is based on the attack bonus of the player's currently selected style, which is rolled against an opponent's slash defence. 
+
+
+== Item sources ==
+
+
+=== Shop locations ===
+
+
+== Products ==
+
+
+== Used in recommended equipment ==
+Not used in any recommended equipment.
+
+
+== Changes ==
+
+
+=== Gallery (historical) ===
+
+
+== References ==`;
+
+test("OSRS Wiki search returns game pages with opening text", async (t) => {
+    const requests = [];
+    mock.method(globalThis, "fetch", async (url, options) => {
+        const request = new Request(url, options);
+        requests.push(request.url);
+        const target = new URL(request.url);
+        assert.equal(target.hostname, "oldschool.runescape.wiki");
+        assert.equal(request.redirect, "follow");
+        const headers = request.headers;
+        assert.equal(headers.get("authorization"), null);
+        assert.equal(headers.get("cookie"), null);
+        assert.match(headers.get("user-agent"), /hello@pollinations.ai/);
+        if (target.searchParams.get("list") === "search") {
+            assert.equal(target.searchParams.get("srsearch"), "dragon");
+            assert.equal(target.searchParams.get("srlimit"), "2");
+            return Response.json({
+                query: {
+                    searchinfo: { totalhits: 4782 },
+                    search: [
+                        {
+                            ns: 0,
+                            title: "Dragon",
+                            pageid: 13909,
+                            snippet:
+                                '<span class="searchmatch">Dragon</span> may refer to: <span class="searchmatch">Dragon</span> (race) <span class="searchmatch">Dragon</span> equipment Draconic (attribute) - an attribute on creatures weak to Dragonbane weapons Dragonkin - ancient race',
+                        },
+                        {
+                            ns: 0,
+                            title: "Slash weapons",
+                            pageid: 21030,
+                            snippet:
+                                'Dharok&#039;s greataxe (Last Man Standing) <span class="searchmatch">Dragon</span> axe <span class="searchmatch">Dragon</span> axe (or) <span class="searchmatch">Dragon</span> battleaxe <span class="searchmatch">Dragon</span> battleaxe (cr) <span class="searchmatch">Dragon</span> felling axe Gilded axe Infernal axe Infernal',
+                        },
+                    ],
+                },
+            });
+        }
+        assert.equal(target.searchParams.get("prop"), "extracts");
+        assert.equal(target.searchParams.get("redirects"), "1");
+        const title = target.searchParams.get("titles");
+        const extract =
+            title === "Dragon"
+                ? OSRSWIKI_DRAGON_EXTRACT
+                : OSRSWIKI_SLASH_EXTRACT;
+        return Response.json({
+            query: { pages: { 1: { pageid: 1, title, extract } } },
+        });
+    });
+    const c = await client(t);
+    const result = await call(c, "osrswiki_search", {
+        query: "dragon",
+        limit: 2,
+    });
+    assert.notEqual(result.isError, true, JSON.stringify(result));
+    const val = value(result);
+    assert.equal(val.query, "dragon");
+    assert.equal(val.total, 4782);
+    assert.equal(val.results.length, 2);
+    assert.deepEqual(val.results[0], {
+        title: "Dragon",
+        pageid: 13909,
+        snippet:
+            "Dragon may refer to: Dragon (race) Dragon equipment Draconic (attribute) - an attribute on creatures weak to Dragonbane weapons Dragonkin - ancient race",
+        text: `Dragon may refer to:
+
+Dragon (race) Dragon equipment Draconic (attribute) - an attribute on creatures weak to Dragonbane weapons Dragonkin - ancient race responsible for the creation of dragons and dragon equipment Orikalkum - the metal dragon equipment is made from Dragonhide armour`,
+        truncated: false,
+        url: "https://oldschool.runescape.wiki/w/Dragon",
+    });
+    assert.deepEqual(val.results[1], {
+        title: "Slash weapons",
+        pageid: 21030,
+        snippet:
+            "Dharok's greataxe (Last Man Standing) Dragon axe Dragon axe (or) Dragon battleaxe Dragon battleaxe (cr) Dragon felling axe Gilded axe Infernal axe Infernal",
+        text: `Slash is an attack type that is used by weapons classes such as Scimitars, Whips and Claws, and secondarily by weapons such as Swords and Daggers.
+
+The following weapon types offer only slash-based attacks.
+
+The majority of attack styles associated with the following weapon types are slash-based.
+
+The following weapon types have at least one slash-based attack style.
+
+Stab weapons Crush weapons Ranged weapons Magic weapons`,
+        truncated: false,
+        url: "https://oldschool.runescape.wiki/w/Slash_weapons",
+    });
+    // One search fetch plus one extracts fetch per hit.
+    assert.equal(requests.length, 3);
+});
+
+test("OSRS Wiki search returns an empty list for no match and rejects blank queries and out-of-range limits before fetch", async (t) => {
+    let count = 0;
+    mock.method(globalThis, "fetch", async () => {
+        count++;
+        return Response.json({
+            query: { searchinfo: { totalhits: 0 }, search: [] },
+        });
+    });
+    const c = await client(t);
+    const result = await call(c, "osrswiki_search", {
+        query: "zzzzqqqxxyy",
+    });
+    assert.notEqual(result.isError, true, JSON.stringify(result));
+    assert.deepEqual(value(result), {
+        query: "zzzzqqqxxyy",
+        total: 0,
+        results: [],
+    });
+    assert.equal(count, 1);
+    for (const args of [{ query: " " }, { query: "x", limit: 99 }]) {
+        const bad = await call(c, "osrswiki_search", args).catch(() => ({
+            isError: true,
+        }));
+        assert.equal(bad.isError, true);
+    }
+    assert.equal(count, 1);
+});
+
+test("OSRS Wiki search keeps a result whose page cannot be read, drops section headings, and caps long text at 2000 characters", async (t) => {
+    const searchBody = (title) => ({
+        query: {
+            searchinfo: { totalhits: 1 },
+            search: [{ title, pageid: 1, snippet: title }],
+        },
+    });
+    const c = await client(t);
+
+    mock.method(globalThis, "fetch", async (input) => {
+        const url = new URL(input);
+        if (url.searchParams.get("list") === "search")
+            return Response.json(searchBody("Dragon longsword"));
+        return Response.json({
+            error: {
+                code: "missingtitle",
+                info: "The page you specified doesn't exist.",
+            },
+        });
+    });
+    let result = await call(c, "osrswiki_search", {
+        query: "dragon longsword",
+        limit: 1,
+    });
+    assert.notEqual(result.isError, true, JSON.stringify(result));
+    assert.equal(value(result).results[0].text, null);
+    assert.equal(value(result).results[0].truncated, false);
+
+    mock.method(globalThis, "fetch", async (input) => {
+        const url = new URL(input);
+        if (url.searchParams.get("list") === "search")
+            return Response.json(searchBody("Slash weapons"));
+        return Response.json({
+            query: {
+                pages: {
+                    1: {
+                        pageid: 21030,
+                        title: "Slash weapons",
+                        extract: OSRSWIKI_SLASH_EXTRACT,
+                    },
+                },
+            },
+        });
+    });
+    result = await call(c, "osrswiki_search", {
+        query: "slash weapons",
+        limit: 1,
+    });
+    assert.notEqual(result.isError, true, JSON.stringify(result));
+    const slash = value(result).results[0];
+    assert.match(
+        slash.text,
+        /^Slash is an attack type that is used by weapons classes such as Scimitars, Whips and Claws/,
+    );
+    assert.equal(slash.text.includes("=="), false);
+    assert.equal(slash.truncated, false);
+
+    mock.method(globalThis, "fetch", async (input) => {
+        const url = new URL(input);
+        if (url.searchParams.get("list") === "search")
+            return Response.json(searchBody("Dragon longsword"));
+        return Response.json({
+            query: {
+                pages: {
+                    1: {
+                        pageid: 13909,
+                        title: "Dragon longsword",
+                        extract: OSRSWIKI_LONGSWORD_EXTRACT.repeat(3),
+                    },
+                },
+            },
+        });
+    });
+    result = await call(c, "osrswiki_search", {
+        query: "dragon longsword",
+        limit: 1,
+    });
+    assert.notEqual(result.isError, true, JSON.stringify(result));
+    assert.equal(value(result).results[0].text.length, 2000);
+    assert.equal(value(result).results[0].truncated, true);
+    assert.match(
+        value(result).results[0].text,
+        /^The dragon longsword is the third-strongest longsword/,
+    );
 });
