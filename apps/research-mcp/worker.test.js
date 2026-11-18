@@ -364,6 +364,7 @@ for (const modern of [false, true]) {
                 "list_countries",
                 "crossref_search",
                 "crossref_work",
+                "country_capital",
             ].sort(),
         );
     });
@@ -644,4 +645,136 @@ test("CrossRef search and work lookup formats DOIs, authors and citation metrics
     const workVal = value(workRes);
     assert.equal(workVal.work.doi, "10.1038/nature12373");
     assert.equal(workVal.work.container, "Nature");
+});
+
+test("country_capital matches by name and ISO code from one whole-list fetch", async (t) => {
+    let fetches = 0;
+    mock.method(globalThis, "fetch", async (input, init) => {
+        fetches += 1;
+        const url = new URL(input);
+        assert.equal(url.hostname, "countriesnow.space");
+        assert.equal(new Headers(init.headers).get("authorization"), null);
+        assert.equal(new Headers(init.headers).get("cookie"), null);
+        assert.match(
+            new Headers(init.headers).get("user-agent"),
+            /hello@pollinations.ai/,
+        );
+        return Response.json({
+            error: false,
+            msg: "countries and capitals retrieved",
+            data: [
+                {
+                    name: "Afghanistan",
+                    capital: "Kabul",
+                    iso2: "AF",
+                    iso3: "AFG",
+                },
+                {
+                    name: "France",
+                    capital: "Paris",
+                    iso2: "FR",
+                    iso3: "FRA",
+                },
+                {
+                    name: "Japan",
+                    capital: "Tokyo",
+                    iso2: "JP",
+                    iso3: "JPN",
+                },
+                {
+                    name: "United States",
+                    capital: "Washington",
+                    iso2: "US",
+                    iso3: "USA",
+                },
+            ],
+        });
+    });
+    const c = await client(t);
+    let result = await call(c, "country_capital", { country: "france" });
+    assert.notEqual(result.isError, true, JSON.stringify(result));
+    assert.deepEqual(value(result), {
+        country: "France",
+        capital: "Paris",
+        iso2: "FR",
+        iso3: "FRA",
+    });
+    result = await call(c, "country_capital", { country: "jp" });
+    assert.notEqual(result.isError, true, JSON.stringify(result));
+    assert.equal(value(result).capital, "Tokyo");
+    result = await call(c, "country_capital", { country: "USA" });
+    assert.notEqual(result.isError, true, JSON.stringify(result));
+    assert.equal(value(result).country, "United States");
+    assert.equal(fetches, 3);
+});
+
+test("country_capital returns null for capitals the source leaves blank and rejects unknowns without fetching", async (t) => {
+    let fetches = 0;
+    mock.method(globalThis, "fetch", async () => {
+        fetches += 1;
+        return Response.json({
+            error: false,
+            msg: "countries and capitals retrieved",
+            data: [
+                {
+                    name: "Antarctica",
+                    capital: "",
+                    iso2: "AQ",
+                    iso3: "ATA",
+                },
+                {
+                    name: "Bonaire, Saint Eustatius and Saba ",
+                    capital: "",
+                    iso2: "BQ",
+                    iso3: "BES",
+                },
+                {
+                    name: "Cocos (Keeling) Islands",
+                    capital: "West Island",
+                    iso2: "CC",
+                    iso3: "CCK",
+                },
+                {
+                    name: "Cocos Islands",
+                    capital: "West Island",
+                    iso2: "CC",
+                    iso3: "CCK",
+                },
+                {
+                    name: "Curacao",
+                    capital: " Willemstad",
+                    iso2: "CW",
+                    iso3: "CUW",
+                },
+                {
+                    name: "Vatican",
+                    capital: "Vatican City",
+                    iso2: "VA",
+                    iso3: "VAT",
+                },
+                {
+                    name: "Vatican City State (Holy See)",
+                    capital: "Vatican City",
+                    iso2: "VA",
+                    iso3: "VAT",
+                },
+            ],
+        });
+    });
+    const c = await client(t);
+    let result = await call(c, "country_capital", {
+        country: "Antarctica",
+    });
+    assert.notEqual(result.isError, true, JSON.stringify(result));
+    assert.equal(value(result).capital, null);
+    result = await call(c, "country_capital", { country: "curacao" });
+    assert.equal(value(result).capital, "Willemstad");
+    result = await call(c, "country_capital", { country: "VA" });
+    assert.equal(value(result).country, "Vatican");
+    result = await call(c, "country_capital", { country: "zzzzqqq" });
+    assert.equal(result.isError, true);
+    assert.match(result.content[0].text, /No country found for "zzzzqqq"/);
+    result = await call(c, "country_capital", { country: "   " });
+    assert.equal(result.isError, true);
+    assert.equal(fetches, 4);
 });
